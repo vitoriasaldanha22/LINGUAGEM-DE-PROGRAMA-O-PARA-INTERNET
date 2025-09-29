@@ -1,131 +1,160 @@
+require('dotenv').config(); // Carrega as variáveis de ambiente do arquivo .env
 const express = require("express");
 const mysql = require("mysql2/promise");
+const jwt = require("jsonwebtoken");
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
-// Configuração do MySQL (igual ao docker-compose)
+// Carrega segredos a partir das variáveis de ambiente
+const JWT_SECRET = process.env.JWT_SECRET;
+const API_KEY = process.env.API_KEY;
+
+app.use(express.json());
+
+// Configuração do MySQL com variáveis de ambiente
 const dbConfig = {
-  host: "mysql",       // nome do serviço no docker-compose
-  user: "appuser",
-  password: "apppass",
-  database: "appdb"
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME
 };
 
-app.get("/", (req, res) => {
+// Middleware para verificar JWT
+function authenticateJWT(req, res, next) {
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader) {
+    return res.status(401).json({ error: "Token não fornecido" });
+  }
 
-  //res.json({ message: "Node.js está rodando no Docker!" });
-  const htmlstring = `
+  const token = authHeader.split(" ")[1]; // formato: "Bearer <token>"
 
- <!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <title>Documentação da API — Vitória Saldanha</title>
-</head>
-<body>
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: "Token inválido ou expirado" });
+    }
+    req.user = user; // payload do JWT
+    next();
+  });
+}
 
-  <header>
-    <h1>Documentação da API</h1>
-    <p><strong>Vitória Saldanha</strong> — Curso: Sistemas de Informação (5º período) — 21 anos</p>
-  </header>
+// Endpoint para gerar token usando API Key
+app.post("/auth", (req, res) => {
+  const { apiKey } = req.body;
 
-  <nav>
-    <a href="#overview">Visão Geral</a>
-    <a href="#endpoints">Endpoints</a>
-    <a href="#exemplos">Exemplos</a>
-    <a href="#contato">Contato</a>
-  </nav>
+  if (!apiKey || apiKey !== API_KEY) {
+    return res.status(403).json({ error: "API Key inválida" });
+  }
 
-  <section id="overview">
-    <h2>Visão Geral</h2>
-    <p>Esta documentação descreve os recursos e como interagir com a API.</p>
-    <p>Base URL: <code>https://api.seuservidor.com/v1</code></p>
-    <p>Autenticação: Adicione um token no cabeçalho <code>Authorization: Bearer &lt;SEU_TOKEN&gt;</code>.</p>
-  </section>
+  const payload = { role: "admin", name: "API User" };
+  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "1h" });
 
-  <section id="endpoints">
-    <h2>Endpoints</h2>
-
-    <h3>GET /users</h3>
-    <p>Retorna a lista de usuários.</p>
-    <p><strong>Resposta (200 OK)</strong>:</p>
-    <pre>[
-  {
-    "id": 1,
-    "nome": "João Silva",
-    "email": "joao.silva@example.com",
-    "telefone": "11999999999",
-    "criado_em": "2025-09-01T22:46:35.000Z"
-  },
-  ...
-]</pre>
-
-    <h3>GET /users/{id}</h3>
-    <p>Retorna um usuário pelo ID.</p>
-    <p><strong>Parâmetro:</strong> <code>id</code> (inteiro) — obrigatório.</p>
-    <p><strong>Resposta (200 OK)</strong>:</p>
-    <pre>{
-  "id": 1,
-  "nome": "João Silva",
-  "email": "joao.silva@example.com",
-  "telefone": "11999999999",
-  "criado_em": "2025-09-01T22:46:35.000Z"
-}</pre>
-    <p><strong>Resposta (404 Not Found)</strong>:</p>
-    <pre>{
-  "error": "Usuário não encontrado"
-}</pre>
-  </section>
-
-  <section id="exemplos">
-    <h2>Exemplos de Uso</h2>
-    <h3>Chamada com curl</h3>
-    <pre>curl -X GET "https://api.seuservidor.com/v1/users" \
-  -H "Authorization: Bearer SEU_TOKEN"</pre>
-
-    <h3>Resposta esperada</h3>
-    <pre>[
-  {
-    "id": 1,
-    "nome": "João Silva",
-    "email": "joao.silva@example.com",
-    "telefone": "11999999999",
-    "criado_em": "2025-09-01T22:46:35.000Z"
-  },
-  ...
-]</pre>
-  </section>
-
-  <section id="contato">
-    <h2>Contato</h2>
-    <p>Documentação criada por <strong>Vitória Saldanha</strong>.</p>
-    <p>Curso: Sistemas de Informação — 5º período</p>
-    <p>Idade: 21 anos</p>
-  </section>
-
-  <footer>
-    <p>© 2025 Vitória Saldanha — Documentação gerada em HTML.</p>
-  </footer>
-
-</body>
-</html>
-
-  `;
-
-  res.send(htmlstring);
+  res.json({ token });
 });
-app.get("/api/v1/cliente", async (req, res) => {
 
- 
+// Página inicial
+app.get("/", (req, res) => {
+  res.send("<h1>📖 API de Clientes com JWT + API Key</h1>");
+});
 
+// --- ROTAS CRUD PROTEGIDAS ---
 
-
+// 🔒 Listar todos os clientes
+app.get("/api/v1/cliente", authenticateJWT, async (req, res) => {
   try {
     const connection = await mysql.createConnection(dbConfig);
-    const [rows] = await connection.execute("SELECT * FROM clientes");
+    const [rows] = await connection.execute("SELECT id, nome, email, telefone FROM clientes");
     await connection.end();
     res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 🔒 Obter um cliente por ID
+app.get("/api/v1/cliente/:id", authenticateJWT, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const connection = await mysql.createConnection(dbConfig);
+      const [rows] = await connection.execute("SELECT id, nome, email, telefone FROM clientes WHERE id = ?", [id]);
+      await connection.end();
+  
+      if (rows.length === 0) {
+        return res.status(404).json({ error: "Cliente não encontrado" });
+      }
+      res.json(rows[0]);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+});
+
+// 🔒 Criar novo cliente
+app.post("/api/v1/cliente", authenticateJWT, async (req, res) => {
+  try {
+    const { nome, email, telefone } = req.body;
+
+    if (!nome || !email || !telefone) {
+      return res.status(400).json({ error: "Campos obrigatórios: nome, email, telefone" });
+    }
+
+    const connection = await mysql.createConnection(dbConfig);
+    const [result] = await connection.execute(
+      "INSERT INTO clientes (nome, email, telefone) VALUES (?, ?, ?)",
+      [nome, email, telefone]
+    );
+    await connection.end();
+
+    res.status(201).json({
+      message: "Cliente criado com sucesso!",
+      clienteId: result.insertId,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 🔒 Atualizar um cliente
+app.put("/api/v1/cliente/:id", authenticateJWT, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { nome, email, telefone } = req.body;
+  
+      if (!nome || !email || !telefone) {
+        return res.status(400).json({ error: "Campos obrigatórios: nome, email, telefone" });
+      }
+  
+      const connection = await mysql.createConnection(dbConfig);
+      const [result] = await connection.execute(
+        "UPDATE clientes SET nome = ?, email = ?, telefone = ? WHERE id = ?",
+        [nome, email, telefone, id]
+      );
+      await connection.end();
+  
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: "Cliente não encontrado" });
+      }
+  
+      res.json({ message: "Cliente atualizado com sucesso!" });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+});
+
+// 🔒 Deletar cliente
+app.delete("/api/v1/cliente/:id", authenticateJWT, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const connection = await mysql.createConnection(dbConfig);
+    const [result] = await connection.execute("DELETE FROM clientes WHERE id = ?", [id]);
+    await connection.end();
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Cliente não encontrado" });
+    }
+
+    res.json({ message: "Cliente deletado com sucesso!" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
