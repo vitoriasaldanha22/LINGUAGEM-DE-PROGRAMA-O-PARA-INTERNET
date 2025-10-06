@@ -79,7 +79,10 @@ services:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: rootpass
       MONGO_INITDB_DATABASE: appdb
+<<<<<<< HEAD
       
+=======
+>>>>>>> 1250c134354f6f226f619c5939b7ce84e2a3c80c
     volumes:
       - ./mongo_data:/data/db
     ports:
